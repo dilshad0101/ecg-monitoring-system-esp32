@@ -1,5 +1,6 @@
 package com.app.healthmonitor.home
 
+import android.graphics.drawable.Icon
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
@@ -18,11 +19,18 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedIconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -33,6 +41,7 @@ import androidx.compose.ui.graphics.PaintingStyle.Companion.Stroke
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.font.FontWeight
@@ -50,27 +59,51 @@ fun HomeScreen(
     modifier: Modifier
 ){
     val scrollState = rememberScrollState()
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     Scaffold(
         topBar = {
-            Box(
+            CenterAlignedTopAppBar(
+                title = {
+                    Text("HEALTH MONITOR",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .padding(//horizontal = 30.dp,
+                                vertical = 0.dp),
+                    )},
+                navigationIcon = {
+                    FilledIconButton(
+                        onClick = {},
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = Color(244,244,248)
+                        )
+                        ) {
+                        Icon(painter = painterResource(R.drawable.baseline_menu_24),"menu")
+                    }
+                },
+                actions = {
+                    FilledIconButton(
+                        onClick = {},
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = Color(244,244,248)
+                        )
+                    ) {
+                        Icon(painter = painterResource(R.drawable.round_person_24),"menu")
+                    }
+                },
+                scrollBehavior = scrollBehavior,
+                colors = TopAppBarDefaults.topAppBarColors(
+                    scrolledContainerColor = Color.Transparent,
+                    containerColor = Color.Transparent ),
                 modifier = Modifier.fillMaxWidth()
-                    .height(60.dp),
-                contentAlignment = Alignment.CenterStart
-            ){
-                TopAppBar(
-                    title = {
-                        Text("HEALTH MONITOR",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 17.sp,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier
-                                .padding(horizontal = 30.dp, vertical = 0.dp),
-                        )},
-                    //expandedHeight = 30.dp
-                )
-            }
+                    .padding(top = 20.dp, start = 20.dp, end = 20.dp)
+
+                //expandedHeight = 30.dp
+            )
         },
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection)
 
     ) {
         LazyColumn (
@@ -134,15 +167,31 @@ fun HomeScreen(
                 Spacer(Modifier.padding(vertical = 15.dp))
 
                 HorizontalCard(
-                    icon = painterResource(R.drawable.baseline_sentiment_satisfied_24),
+                    icon = painterResource(R.drawable.outline_airwave_24),
+                    title = "HRV (Current)",
+                    value = "50ms",
+                )
+
+                HorizontalCard(
+                    icon = painterResource(R.drawable.outline_mood_24),
                     title = "STRESS INDICATOR",
                     value = "LOW",
-
                     )
+                HorizontalCard(
+                    icon = painterResource(R.drawable.baseline_nights_stay_24),
+                    title = "REST QUALITY",
+                    value = "8.2Hrs",
+                )
+                Spacer(Modifier.padding(vertical = 15.dp))
+                ECGWaveform()
+                Spacer(Modifier.padding(vertical = 15.dp))
+                InsightSection()
 
             }
 
         }
+
+
 //        Text(
 //            text = uiState.firstDieValue.toString(),
 //            modifier = modifier.clickable(
