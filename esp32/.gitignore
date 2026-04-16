@@ -3,4 +3,8 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+<<<<<<< HEAD
 .src/config.h
+=======
+.src/config.h
+>>>>>>> aaddb96546d322c6b9718014b506021c2f7a32ca
