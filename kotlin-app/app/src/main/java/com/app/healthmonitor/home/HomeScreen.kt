@@ -32,6 +32,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,6 +52,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.app.healthmonitor.R
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -58,9 +60,14 @@ fun HomeScreen(
     viewModel: AppViewModel = viewModel(),
     modifier: Modifier
 ){
+
+    LaunchedEffect(Unit) {
+        viewModel.startAutoRefresh()
+    }
     val scrollState = rememberScrollState()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val isLiveSync by viewModel.isLiveSync.collectAsStateWithLifecycle()
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -125,7 +132,7 @@ fun HomeScreen(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 30.dp)
                     ) {
                         Text(
-                            text = "REAL-TIME PULSE",
+                            text = if(isLiveSync)"REAL-TIME PULSE" else "LAST RECORDED PULSE",
                             style = MaterialTheme.typography.labelSmall
                         )
                         Row(
@@ -133,7 +140,7 @@ fun HomeScreen(
                             modifier = Modifier.padding(start = 15.dp)
                         ) {
                             Text(
-                                text = "72",
+                                    text = if (uiState.bpm.toString() != "0") uiState.bpm.toString() else "N/A",
                                 style = MaterialTheme.typography.titleLarge,
                                 fontSize = 40.sp,
                                 fontWeight = FontWeight.Bold,
@@ -145,7 +152,7 @@ fun HomeScreen(
                                 fontWeight = FontWeight.Bold
                             )
                         }
-                        LiveEcgIndicator(true)
+                        LiveEcgIndicator(isLiveSync)
 
                     }
                 }
@@ -168,7 +175,7 @@ fun HomeScreen(
 
                 HorizontalCard(
                     icon = painterResource(R.drawable.outline_airwave_24),
-                    title = "HRV (Current)",
+                    title = "HRV",
                     value = "50ms",
                 )
 

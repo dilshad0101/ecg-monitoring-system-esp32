@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -60,6 +61,7 @@ dependencies {
 
     implementation("androidx.compose.ui:ui-text-google-fonts:1.10.6")
 
+
     val lifecycle_version = "2.10.0"
 
     // ViewModel
@@ -75,4 +77,17 @@ dependencies {
 
     // Saved state module for ViewModel
     implementation("androidx.lifecycle:lifecycle-viewmodel-savedstate:$lifecycle_version")
+
+    val supabase_version = "3.5.0"
+    val ktor_version = "3.4.2"
+    implementation(platform("io.github.jan-tennert.supabase:bom:$supabase_version"))
+    implementation("io.github.jan-tennert.supabase:postgrest-kt")
+    implementation("io.ktor:ktor-client-android:$ktor_version")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.10.0")
+
+
+
+
+
+
 }

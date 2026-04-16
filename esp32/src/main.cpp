@@ -5,6 +5,12 @@
 #include "config.h"
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <WiFiManager.h>
+#include <Adafruit_ADS1X15.h>
+#include "mpu6050_handler.h"
+
+Adafruit_ADS1115 ads;
+#define ADS_MAX   26400   // counts at 3.3 V with GAIN_ONE
 
 // ── Display ────────────────────────────────────────────────
 #define SCREEN_W  128
@@ -21,7 +27,7 @@ int ecgBuffer[SCREEN_W];
 int indexX = 0;
 
 // ── Timing control  ──────
-#define SAMPLE_INTERVAL 4    // 250 Hz sampling
+#define SAMPLE_INTERVAL 4000    // 250 Hz sampling
 #define PIXEL_INTERVAL 20    // controls horizontal speed
 #define DRAW_INTERVAL 40     // 25 FPS display
 
@@ -33,14 +39,10 @@ int latestY = 0;
 
 // ── Filter  and DC Offset removal using Moving Average ────────────────────────────────────────────────
 //Default 5, but 7 seems to work better. Adjust as needed.
-#define FILTER_SIZE 7
+#define FILTER_SIZE 5
 int filterBuf[FILTER_SIZE];
 int filterIdx = 0;
 
-#define DC_FILTER_SIZE 200
-int dcBuffer[DC_FILTER_SIZE];
-int dcIndex = 0;
-long dcSum = 0;
 
 int smooth(int v) {
   filterBuf[filterIdx] = v;
@@ -48,14 +50,9 @@ int smooth(int v) {
   int s = 0;
   for (int i = 0; i < FILTER_SIZE; i++) s += filterBuf[i];
   int smoothened =  s / FILTER_SIZE; // return this if you don't want DC removal
-  dcSum -= dcBuffer[dcIndex];
-  dcBuffer[dcIndex] = smoothened;
-  dcSum += smoothened;
-  dcIndex = (dcIndex + 1) % DC_FILTER_SIZE;
 
-  int dcAvg = dcSum / DC_FILTER_SIZE;
 
-  return smoothened - dcAvg + 2000;  // re-center
+  return smoothened; // - dcAvg + 2048;  // re-center
 }
 
 // ── Adaptive scaling ──────────────────────────────────────
@@ -64,30 +61,27 @@ int smooth(int v) {
 
 int windowBuf[WINDOW_SIZE];
 int windowIdx = 0;
-float dynMin = 2000, dynMax = 2100;
+float dynMin = 1900.0f, dynMax = 2200.0f;
 
 
 int getScaledY(int value) {
   windowBuf[windowIdx] = value;
   windowIdx = (windowIdx + 1) % WINDOW_SIZE;
 
-  int lMin = 4095, lMax = 0;
+  int lMin = 32767, lMax = -32768;
   for (int i = 0; i < WINDOW_SIZE; i++) {
     if (windowBuf[i] < lMin) lMin = windowBuf[i];
     if (windowBuf[i] > lMax) lMax = windowBuf[i];
   }
+  dynMin = dynMin * DECAY + lMin * (1.0f - DECAY);
+  dynMax = dynMax * DECAY + lMax * (1.0f - DECAY);
 
-  dynMin = dynMin * DECAY + lMin * (1 - DECAY);
-  dynMax = dynMax * DECAY + lMax * (1 - DECAY);
+  float center = (dynMin + dynMax) / 2.0f;
+  float half   = (dynMax - dynMin) / 2.0f;
 
-  float range = dynMax - dynMin;
-  if (range < 50) range = 50;
-
-  float center = (dynMax + dynMin) / 2;
-  float half = range / 2;
-
-  if (half > 600) half = 600;
-  if (half < 50) half = 50;
+  // After normalisation to 12-bit, a good ECG swing is ~100–400 counts
+  if (half < 30)  half = 30;    // prevent flatline zoom-in
+  if (half > 400) half = 400;   // prevent noise zoom-out
 
   int y = map(value, center - half, center + half,
               WAVE_BOTTOM, WAVE_TOP);
@@ -106,38 +100,64 @@ unsigned long rr = 0;
 unsigned long avg_rr = 0;
 
 void updateBPM(int val) {
+  static int prev = 0;
+  static float bpmSmooth = 0;
+
   float thr = dynMin + 0.55 * (dynMax - dynMin);
   unsigned long now = millis();
 
-  #define REFRACTORY_PERIOD 250  // ms
+  #define REFRACTORY_PERIOD 400  // ms (prevents double detection)
 
-  if (val > thr && !aboveThr && (now - lastPeakMs > REFRACTORY_PERIOD)) {
+  bool isRising = (val > prev);
+  bool strongPeak = (val - dynMin) > 0.6 * (dynMax - dynMin);
+
+  if (val > thr &&
+      isRising &&
+      strongPeak &&
+      !aboveThr &&
+      (now - lastPeakMs > REFRACTORY_PERIOD)) {
+
     aboveThr = true;
-    rr = now - lastPeakMs;
 
-    if (lastPeakMs > 0 && rr >= 300 && rr <= 2000) {
-      bpmRR[bpmRRi] = rr;
+    unsigned long rrInterval = now - lastPeakMs;
+
+    if (lastPeakMs > 0 && rrInterval >= 300 && rrInterval <= 2000) {
+      bpmRR[bpmRRi] = rrInterval;
       bpmRRi = (bpmRRi + 1) % BPM_RR_COUNT;
       if (bpmRRn < BPM_RR_COUNT) bpmRRn++;
 
+      // Average RR
       float avg = 0;
       for (int i = 0; i < bpmRRn; i++) avg += bpmRR[i];
       avg /= bpmRRn;
+
       avg_rr = avg;
-      bpmVal = constrain(60000 / avg, 30, 220);
+
+      int bpmRaw = constrain(60000 / avg, 30, 220);
+
+      // 🔥 Smooth BPM (VERY IMPORTANT)
+      bpmSmooth = 0.8 * bpmSmooth + 0.2 * bpmRaw;
+      bpmVal = bpmSmooth;
     }
 
     lastPeakMs = now;
   }
 
-  if (val < thr) aboveThr = false;
+  // Reset threshold crossing
+  if (val < thr) {
+    aboveThr = false;
+  }
 
+  // Timeout: no heartbeat detected
   if (lastPeakMs > 0 && now - lastPeakMs > 3000) {
     bpmVal = 0;
     bpmRRn = 0;
     lastPeakMs = 0;
+    bpmSmooth = 0;
   }
-}
+
+  prev = val;  // update previous sample
+} 
 int getThresholdY(float thr) {
   float center = (dynMax + dynMin) / 2;
   float half = (dynMax - dynMin) / 2;
@@ -154,33 +174,28 @@ int getThresholdY(float thr) {
 // ── SQI ───────────────────────────────────────────────────
 int calcSQI() {
   float range = dynMax - dynMin;
-  if (range < 30) return 0;
-  if (range < 80) return 25;
-  if (range < 150) return 50;
-  if (range < 300) return 75;
-  return 95;
+
+  int baseSQI;
+  if (range < 20)  baseSQI = 0;
+  else if (range < 50)  baseSQI = 25;
+  else if (range < 100) baseSQI = 50;
+  else if (range < 200) baseSQI = 75;
+  else baseSQI = 95;
+  int finalSQI = baseSQI - getMotionPenalty();
+  return constrain(finalSQI, 0, 100);
 }
 
-// ── Battery ───────────────────────────────────────────────
-int readBattPct() {
-  int raw = analogRead(PIN_BATT_ADC);
-  float v = raw * (3.3f / 4095.0f) * 2;
-  int pct = (v - 3.0f) / (4.2f - 3.0f) * 100;
-  return constrain(pct, 0, 100);
-}
-
-// ── Lead off screen ───────────────────────────────────────
-void drawLeadOff() {
+// ── Draw texts in screen ───────────────────────────────────────
+void drawText(const char *text) {
   display.clearDisplay();
-  display.setTextSize(2);
+  display.setTextSize(1);
   display.setCursor(10, 20);
-  display.print("DETACHED!");
+  display.print(text);
   display.display();
 }
 
-
 // ── Main UI ───────────────────────────────────────────────
-void drawMain(int bpm, int batt, int sqi) {
+void drawMain(int bpm, int sqi) {
   display.clearDisplay();
 
   display.setTextSize(1);
@@ -189,11 +204,6 @@ void drawMain(int bpm, int batt, int sqi) {
   display.print("HR:");
   display.print(bpm > 0 ? bpm : 0);
   display.print(" BPM");
-
-  display.setCursor(80, 0);
-  display.print("Bat:");
-  display.print(batt);
-  display.print("%");
 
   display.drawFastHLine(0, 9, SCREEN_W, WHITE);
   display.drawFastHLine(0, 50, SCREEN_W, WHITE);
@@ -218,7 +228,7 @@ void drawMain(int bpm, int batt, int sqi) {
 
 // ── Supabase integration (optional) ───────────────────────────────────────────────
 void sendToSupabase(int rr, int avg_rr, int bpm, int sqi) {
-  if (WiFi.status() == WL_CONNECTED) {
+  if (WiFi.status() == WL_CONNECTED && sqi >= SQI_MIN) {
 
     HTTPClient http;
     WiFiClientSecure client;
@@ -237,17 +247,21 @@ void sendToSupabase(int rr, int avg_rr, int bpm, int sqi) {
     json += "\"sqi\":" + String(sqi);
     json += "}";
 
+    
     int code = http.POST(json);
 
-    Serial.print("HTTP: ");
+    Serial.print("Data Uploaded with SQI of ");
+    Serial.print(sqi);
+    Serial.print(" Upload Status Code HTTP: ");
     Serial.println(code);
 
     http.end();
-  }
+  }else if (sqi < SQI_MIN && WiFi.status() == WL_CONNECTED){
+    Serial.println("SQI too low, skipping upload");
+}
 }
 void supabaseTask(void *param) {
   while (true) {
-
     sendToSupabase(rr, avg_rr, bpmVal, calcSQI());
 
     vTaskDelay(6000 / portTICK_PERIOD_MS);  // every 1 sec
@@ -256,27 +270,28 @@ void supabaseTask(void *param) {
 
 // ── Setup ────────────────────────────────────────────────
 void setup() {
-  Serial.begin(115200);
 
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
-
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-
-while (WiFi.status() != WL_CONNECTED) {
   delay(500);
-  Serial.print(".");
-}
-Serial.println("WiFi Connected");
+  Serial.begin(115200);
 
+  delay(500);
   display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+      Serial.println("OLED failed");
+      while (true);
+  }
   display.setTextColor(WHITE);
 
   analogReadResolution(12);
+  analogSetAttenuation(ADC_11db);
+
+  ads.begin();
+  ads.setGain(GAIN_ONE);  
+  ads.setDataRate(RATE_ADS1115_250SPS);
 
   pinMode(PIN_ECG_LO_POS, INPUT);
   pinMode(PIN_ECG_LO_NEG, INPUT);
-  pinMode(PIN_ECG_SDN, OUTPUT);
-  digitalWrite(PIN_ECG_SDN, HIGH);
 
   xTaskCreatePinnedToCore(
   supabaseTask,     // function
@@ -286,7 +301,41 @@ Serial.println("WiFi Connected");
   1,                // priority
   NULL,
   0                 // core 0 (keep loop on core 1)
-);
+  );
+  drawText("CONNECTING TO WIFI...");
+  
+  delay(500);
+  WiFiManager wifiManager;
+  //wifiManager.resetSettings();
+  bool wifiRes = wifiManager.autoConnect("ECG-WiFi");
+  if (!wifiRes) {
+    Serial.println("Failed to connect to WiFi. Restarting...");
+    drawText("WIFI FAILED! RESTARTING...");
+    delay(1000);
+    ESP.restart();
+    
+  }else { 
+    drawText("WiFi Connected!");
+    delay(1000);
+    Serial.println("WiFi Connected");
+    Serial.println(WiFi.SSID());
+  }
+  wifiManager.setTimeout(180); 
+
+  initMPU6050(); //init motion sensor
+}
+
+
+int removeBaseline(int x) { //HPF
+  static float prev_y = 0;
+  static float prev_x = 0;
+
+  float y = 0.99 * (prev_y + x - prev_x);
+
+  prev_y = y;
+  prev_x = x;
+
+  return (int)y;
 }
 
 // ── LOOP ─────────────────────────────────────────────────
@@ -295,43 +344,41 @@ void loop() {
                  digitalRead(PIN_ECG_LO_NEG);
 
   // 🔹 FAST SAMPLING
-  if (millis() - lastSample >= SAMPLE_INTERVAL) {
-    lastSample = millis();
+  if (micros() - lastSample >= SAMPLE_INTERVAL) {
+    lastSample = micros();
 
-    int raw = analogRead(PIN_ECG_OUT);
-    int filtered = smooth(raw);
+    int16_t rawADS = ads.readADC_SingleEnded(0);
+    int raw = map(constrain((int)rawADS, 0, ADS_MAX), 0, ADS_MAX, 0, 4095);
+    int centered = removeBaseline(raw);
+    int filtered = smooth(centered);
 
     latestY = getScaledY(filtered);
 
+  
     updateBPM(filtered);
 
-   // Serial.println(raw);
+    //Serial.println(raw);
   }
+  updateMotion(); // update motion values every loop (can be optimized to run less frequently)
   int sqi = calcSQI();
 
   //  SLOW GRAPH MOVEMENT 
   if (millis() - lastPixel >= PIXEL_INTERVAL) {
-    lastPixel = millis();
+    lastPixel += PIXEL_INTERVAL;
 
-    ecgBuffer[indexX] = latestY;
+    ecgBuffer[indexX] = latestY;  
     indexX = (indexX + 1) % SCREEN_W;
   }
 
   // DRAW
-  if (millis() - lastDraw >= DRAW_INTERVAL) {
+      if (millis() - lastDraw >= DRAW_INTERVAL) {
     lastDraw = millis();
 
     if (leadOff) {
-      drawLeadOff();
+      drawText("LEAD OFF!");
     } else {
-      drawMain(bpmVal, readBattPct(), sqi);
+      drawMain(bpmVal, sqi);
     }
   }
-  static unsigned long lastUpload = 0;
 
-  if (millis() - lastUpload > 1000) {  // every 1 sec
-    lastUpload = millis();
-
-    //sendToSupabase(rr, avg_rr, bpmVal, sqi); removed from loop because it is blocking and causes display lag. Now handled in separate task.
-}
 }

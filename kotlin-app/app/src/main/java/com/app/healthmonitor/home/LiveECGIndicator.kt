@@ -90,7 +90,7 @@ fun LiveEcgIndicator(
 
             drawPath(
                 path = path,
-                color = Color(0xFF0F766E),
+                color = if (isLive) Color(0xFF0F766E) else Color.Gray,
                 style = Stroke(width = 4f, cap = StrokeCap.Round)
             )
         }
@@ -100,7 +100,7 @@ fun LiveEcgIndicator(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
                 .background(
-                    color = if (isLive) Color(0xFF9EDBD6) else Color.Gray,
+                    color = if (isLive) Color(0xFF9EDBD6) else Color.LightGray,
                     shape = RoundedCornerShape(50)
                 )
                 .padding(horizontal = 16.dp, vertical = 8.dp),
@@ -111,7 +111,7 @@ fun LiveEcgIndicator(
                 modifier = Modifier
                     .size(6.dp)
                     .background(
-                        color = if (isLive) Color(0xFF0F766E) else Color.DarkGray,
+                        color = if (isLive) Color(0xFF0F766E) else Color.Gray,
                         shape = CircleShape
                     )
             )
@@ -122,7 +122,7 @@ fun LiveEcgIndicator(
                 text = if (isLive) "LIVE SYNCING" else "OFFLINE",
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Medium,
-                color = Color(0xFF0F766E)
+                color = if (isLive) Color(0xFF0F766E) else Color.Gray
             )
         }
     }
