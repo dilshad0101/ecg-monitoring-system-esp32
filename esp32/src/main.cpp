@@ -43,16 +43,14 @@ int latestY = 0;
 int filterBuf[FILTER_SIZE];
 int filterIdx = 0;
 
-
 int smooth(int v) {
   filterBuf[filterIdx] = v;
   filterIdx = (filterIdx + 1) % FILTER_SIZE;
   int s = 0;
   for (int i = 0; i < FILTER_SIZE; i++) s += filterBuf[i];
-  int smoothened =  s / FILTER_SIZE; // return this if you don't want DC removal
+  int smoothened =  s / FILTER_SIZE;
 
-
-  return smoothened; // - dcAvg + 2048;  // re-center
+  return smoothened; 
 }
 
 // ── Adaptive scaling ──────────────────────────────────────
@@ -62,7 +60,6 @@ int smooth(int v) {
 int windowBuf[WINDOW_SIZE];
 int windowIdx = 0;
 float dynMin = 1900.0f, dynMax = 2200.0f;
-
 
 int getScaledY(int value) {
   windowBuf[windowIdx] = value;
@@ -98,18 +95,38 @@ bool aboveThr = false;
 unsigned long lastPeakMs = 0;
 unsigned long rr = 0;
 unsigned long avg_rr = 0;
+#define HRV_SIZE 10
 
+float rrHistory[HRV_SIZE];
+int rrIndex = 0;
+int rrCount = 0;
+float rmssd = 0;
+
+float calculateHRV() {
+  if (rrCount < 2) return 0;
+
+  float sumSq = 0;
+
+  for (int i = 1; i < rrCount; i++) {
+    float diff = rrHistory[i] - rrHistory[i - 1];
+    sumSq += diff * diff;
+  }
+
+  rmssd = sqrt(sumSq / (rrCount - 1));
+
+  return rmssd;
+}
 void updateBPM(int val) {
   static int prev = 0;
   static float bpmSmooth = 0;
 
-  float thr = dynMin + 0.55 * (dynMax - dynMin);
+  float thr = dynMin + 0.6* (dynMax - dynMin);
   unsigned long now = millis();
 
   #define REFRACTORY_PERIOD 400  // ms (prevents double detection)
 
   bool isRising = (val > prev);
-  bool strongPeak = (val - dynMin) > 0.6 * (dynMax - dynMin);
+  bool strongPeak = (val - dynMin) > 0.65+ * (dynMax - dynMin);
 
   if (val > thr &&
       isRising &&
@@ -121,33 +138,33 @@ void updateBPM(int val) {
 
     unsigned long rrInterval = now - lastPeakMs;
 
-    if (lastPeakMs > 0 && rrInterval >= 300 && rrInterval <= 2000) {
+    if (lastPeakMs > 0 && rrInterval >= 400 && rrInterval <= 2000) {
+
+      // Store RR for HRV
+      rrHistory[rrIndex] = rrInterval;
+      rrIndex = (rrIndex + 1) % HRV_SIZE;
+      if (rrCount < HRV_SIZE) rrCount++;
+      calculateHRV();
+      
       bpmRR[bpmRRi] = rrInterval;
       bpmRRi = (bpmRRi + 1) % BPM_RR_COUNT;
       if (bpmRRn < BPM_RR_COUNT) bpmRRn++;
-
-      // Average RR
+        // Average RR
       float avg = 0;
       for (int i = 0; i < bpmRRn; i++) avg += bpmRR[i];
       avg /= bpmRRn;
-
       avg_rr = avg;
-
       int bpmRaw = constrain(60000 / avg, 30, 220);
 
-      // 🔥 Smooth BPM (VERY IMPORTANT)
       bpmSmooth = 0.8 * bpmSmooth + 0.2 * bpmRaw;
       bpmVal = bpmSmooth;
     }
-
     lastPeakMs = now;
   }
-
   // Reset threshold crossing
   if (val < thr) {
     aboveThr = false;
   }
-
   // Timeout: no heartbeat detected
   if (lastPeakMs > 0 && now - lastPeakMs > 3000) {
     bpmVal = 0;
@@ -158,6 +175,7 @@ void updateBPM(int val) {
 
   prev = val;  // update previous sample
 } 
+
 int getThresholdY(float thr) {
   float center = (dynMax + dynMin) / 2;
   float half = (dynMax - dynMin) / 2;
@@ -234,28 +252,27 @@ void sendToSupabase(int rr, int avg_rr, int bpm, int sqi) {
     WiFiClientSecure client;
     client.setInsecure(); //reduce security (TLS: Transport Layer Security) for simplicity
     http.begin(client,SUPABASE_URL);
-
     http.addHeader("Content-Type", "application/json");
     http.addHeader("apikey", SUPABASE_API_KEY);
     http.addHeader("Authorization", "Bearer " + String(SUPABASE_API_KEY));
     http.addHeader("Prefer", "return=minimal");
-
+  
     String json = "{";
     json += "\"rr\":" + String(rr) + ",";
     json += "\"avg_rr\":" + String(avg_rr) + ",";
     json += "\"bpm\":" + String(bpm) + ",";
-    json += "\"sqi\":" + String(sqi);
-    json += "}";
+    json += "\"sqi\":" + String(sqi) + ",";
+    json += "\"hrv\":"  + String((int)rmssd);
 
-    
+    json += "}";
     int code = http.POST(json);
 
     Serial.print("Data Uploaded with SQI of ");
     Serial.print(sqi);
     Serial.print(" Upload Status Code HTTP: ");
     Serial.println(code);
-
     http.end();
+
   }else if (sqi < SQI_MIN && WiFi.status() == WL_CONNECTED){
     Serial.println("SQI too low, skipping upload");
 }
@@ -263,7 +280,6 @@ void sendToSupabase(int rr, int avg_rr, int bpm, int sqi) {
 void supabaseTask(void *param) {
   while (true) {
     sendToSupabase(rr, avg_rr, bpmVal, calcSQI());
-
     vTaskDelay(6000 / portTICK_PERIOD_MS);  // every 1 sec
   }
 }
@@ -306,7 +322,6 @@ void setup() {
   
   delay(500);
   WiFiManager wifiManager;
-  //wifiManager.resetSettings();
   bool wifiRes = wifiManager.autoConnect("ECG-WiFi");
   if (!wifiRes) {
     Serial.println("Failed to connect to WiFi. Restarting...");
@@ -340,10 +355,8 @@ int removeBaseline(int x) { //HPF
 
 // ── LOOP ─────────────────────────────────────────────────
 void loop() {
-  bool leadOff = digitalRead(PIN_ECG_LO_POS) ||
-                 digitalRead(PIN_ECG_LO_NEG);
+  bool leadOff = digitalRead(PIN_ECG_LO_POS) || digitalRead(PIN_ECG_LO_NEG);
 
-  // 🔹 FAST SAMPLING
   if (micros() - lastSample >= SAMPLE_INTERVAL) {
     lastSample = micros();
 
@@ -380,5 +393,4 @@ void loop() {
       drawMain(bpmVal, sqi);
     }
   }
-
 }

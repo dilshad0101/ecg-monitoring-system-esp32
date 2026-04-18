@@ -261,24 +261,11 @@ fun ProgressCard(progress: Float = 0.85f) {
                         fontSize = 28.sp,
                         fontWeight = FontWeight.Bold
                     )
-
-                    Text(
-                        text = "WELLNESS",
-                        fontSize = 12.sp,
-                        color = Color.Gray
-                    )
                 }
             }
         }
 
 
         Spacer(modifier = Modifier.height(16.dp))
-
-        Text(
-            text = "Your recovery is Optimal today. Increase activity by 15%.",
-            fontSize = 14.sp,
-            color = Color.Gray,
-            textAlign = TextAlign.Center
-        )
     }
 }

@@ -10,8 +10,11 @@ import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.serializer.UnixTimestampSerializer
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -21,35 +24,41 @@ import kotlin.math.log
 import kotlin.random.Random
 
 
-data class DiceUiState(
-    val firstDieValue: Int? = null,
-    val secondDieValue: Int? = null,
-    val numberOfRolls: Int = 0,
-)
 class AppViewModel : ViewModel() {
-    // Expose screen UI state
     private val _uiState = MutableStateFlow(EcgData(
         0,0,0,0
     ))
     val uiState: StateFlow<EcgData> = _uiState.asStateFlow()
     private val _isLiveSync = MutableStateFlow(false)
     val  isLiveSync: StateFlow<Boolean> = _isLiveSync.asStateFlow()
-
-
     fun startAutoRefresh() {
         viewModelScope.launch {
             while (isActive) {
                 getData()
                 delay(2000)
-                val supabaseTime = if (uiState.value.created_at != null) Instant.parse(uiState.value.created_at) else null
-                val currentTime = Instant.now()
-                val timeDifference = if (supabaseTime == null) null else Duration.between(supabaseTime,currentTime).abs()
-                Log.d("TIME DIFFERENCE",timeDifference.toString())
+                val isLive: StateFlow<Boolean> = _uiState
+                    .map { data ->
+                        val supabaseTime = try {
+                            data.created_at?.let { Instant.parse(it) }
+                        } catch (e: Exception) {
+                            null
+                        }
 
-                if (uiState.value.bpm != 0 && timeDifference != null && timeDifference < Duration.ofSeconds(30)) {
-                    _isLiveSync.update{ true }
-                } else _isLiveSync.update{ false }
-                Log.d("is LIVE?",isLiveSync.toString())
+                        val currentTime = Instant.now()
+                        val timeDiff = supabaseTime?.let {
+                            Duration.between(it, currentTime).abs()
+                        }
+
+                        data.bpm != 0 &&
+                                timeDiff != null &&
+                                timeDiff < Duration.ofSeconds(30)
+                    }
+                    .stateIn(
+                        scope = viewModelScope,
+                        started = SharingStarted.WhileSubscribed(5000),
+                        initialValue = false
+                    )
+                _isLiveSync.value = true
 
             }
         }
@@ -60,13 +69,11 @@ class AppViewModel : ViewModel() {
                 val latest = supabase
                     .from("ecg")
                     .select {
-                        limit(1)
-                        order("created_at", order = Order.DESCENDING    )
+                        limit(5)
+                        order("created_at", order = Order.DESCENDING)
                     }
                     .decodeSingle<EcgData>()
                 Log.d("ECG DATA",latest.toString())
-
-
                 _uiState.update {
                     it.copy(
                         bpm = latest.bpm,
@@ -75,14 +82,10 @@ class AppViewModel : ViewModel() {
                         sqi = latest.sqi
                     )
                 }
-
             } catch (e: Exception) {
                 e.printStackTrace()
             }
         }
-    }
-    fun sendData(){
-
     }
 
 }

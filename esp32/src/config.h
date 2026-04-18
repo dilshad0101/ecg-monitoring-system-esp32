@@ -1,19 +1,5 @@
 #pragma once
 
-// ── Toggle simulation ───────────────────────────────────────
-#define USE_SIMULATION  false   // false when real hardware connected
-
-// ── Pins ───────────────────────────────────────────────────
-//for S3
-// #define PIN_ECG_OUT      10    // AD8232 OUTPUT → ADC
-// #define PIN_ECG_LO_POS   4     // AD8232 LO+
-// #define PIN_ECG_LO_NEG   5     // AD8232 LO-
-// #define PIN_ECG_SDN      6     // AD8232 SDN (HIGH = on)
-// #define PIN_I2C_SDA      8     // Shared I2C — OLED + MPU6050
-// #define PIN_I2C_SCL      9
-// #define PIN_BUZZER       15    // Active buzzer via NPN
-// #define PIN_BATT_ADC      2    // Voltage divider mid-point
-
 //For C3
 #define PIN_ECG_OUT      32    // AD8232 OUTPUT → ADC
 #define PIN_ECG_LO_POS   19     // AD8232 LO+
@@ -50,17 +36,7 @@
 #define ALERT_COOL    60000UL
 #define FALL_COOL     10000UL
 
-// ── Battery ─────────────────────────────────────────────────
-#define BATT_FULL       4.20f
-#define BATT_EMPTY      3.00f
-#define BATT_DIV        2.0f
 #define ADC_FULL        4095
-
-
-
-
-#define WIFI_SSID "KERALA VISION -KV FI"
-#define WIFI_PASSWORD "dilshad@9096"
 
 #define SUPABASE_URL "https://mjsasefqkpsoozpubfvu.supabase.co/rest/v1/ecg"
 #define SUPABASE_API_KEY "sb_publishable_Vz3coi_RFVuiHI1N_NxHcQ_chg6IMzY"

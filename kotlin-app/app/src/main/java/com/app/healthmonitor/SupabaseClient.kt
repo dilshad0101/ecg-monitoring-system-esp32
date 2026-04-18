@@ -8,15 +8,12 @@ import kotlinx.serialization.Serializable
 
 const val SUPABASE_URL = "https://mjsasefqkpsoozpubfvu.supabase.co"
 const val  SUPABASE_API_KEY = "sb_publishable_Vz3coi_RFVuiHI1N_NxHcQ_chg6IMzY"
-
 val supabase = createSupabaseClient(
     supabaseUrl = SUPABASE_URL,
     supabaseKey = SUPABASE_API_KEY
 ) {
     install(Postgrest)
 }
-
-
 @Serializable
 data class EcgData(
     @SerialName("rr")
@@ -27,6 +24,8 @@ data class EcgData(
     val bpm: Int,
     @SerialName("sqi")
     val sqi: Int,
+    @SerialName("rmssd")
+    val rmssd: Int,
     @SerialName("created_at")
     val created_at: String? = null
 )
